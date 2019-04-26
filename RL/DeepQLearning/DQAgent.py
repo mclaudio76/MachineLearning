@@ -6,7 +6,7 @@ from keras.models     import Sequential
 from keras.layers     import Dense
 from keras.optimizers import Adam, SGD
 from keras.models     import load_model
-from collections      import deque
+from collections      import deque 
 '''
 Mauri Claudio, 25.04.2019
 
