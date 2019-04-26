@@ -33,7 +33,7 @@ def stopFunction(results):
     lastNRuns = results[-100:]
     solved    = 0
     for run in lastNRuns:
-        solved = solved +1 if run.next_state[0] >= 0.5 else solved
+        solved = solved +1 if rightMostPosition(run) >= 0.5 else solved
     return solved / 100 >= 0.9
 
 def printStat(results):
