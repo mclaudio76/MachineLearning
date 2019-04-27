@@ -50,7 +50,7 @@ class Actor():
         return self.__model
 
     def save(self, path):
-        self.model().save_weights(path + '_actor.h5')
+        self.model().save_weights(path)
 
     def load_weights(self, path):
         self.model().load_weights(path)
@@ -81,7 +81,7 @@ class Critic():
         return self.__model
 
     def save(self, path):
-        self.model().save_weights(path + '_critic.h5')
+        self.model().save_weights(path)
 
     def load_weights(self, path):
         self.model().load_weights(path)
@@ -89,8 +89,7 @@ class Critic():
 
 class A2C:
     def __init__(self, enviromentName:str, training=True, gamma = 0.99, lr = 0.0001):
-        """ Initialization
-        """
+     
         self.enviromentName    = enviromentName
         self.env               = gym.make(enviromentName) # creates enviroment using symbolic name
         self.env.reset()         # reset enviroments
@@ -200,25 +199,3 @@ class A2C:
         self.critic.load_weights(self.enviromentName+"-critic.mod")
 
 
-def main():
-    
-    def trainEndedEvaluator(episodeList):
-        actualList = episodeList[-100:]
-        sumRew = 0
-        for episode in actualList:
-            for epsState in episode:
-                sumRew += epsState.reward
-        return sumRew / 100 > 450
-    
-    def logInfo(episode, runData):
-        if episode % 50 == 0:
-            totalReward = 0
-            for eps in runData:
-                totalReward += eps.reward
-            print(" Episode ", episode, " reward ", totalReward)
-
-
-    a2c = A2C('CartPole-v1')
-    a2c.train(logger=logInfo, trainEndedEvaluator= trainEndedEvaluator)
-
-main()
