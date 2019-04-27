@@ -6,10 +6,25 @@ from keras.models import Model
 from keras import regularizers
 from keras.utils import to_categorical
 from keras.layers import Input, Dense, Flatten
-from keras.optimizers import Adam, SGD
 import math
 
+'''
+Implementation of a Policy-Gradient based Deep RL, using A2C 
+(advantage actor critic model.)
+In A2C model, we define a common NN which is shared between the "actor" (i.e the model
+that actually chooses which action to perform, following the policy p) and the "critic"
+(i.e the model that evaluates, in terms of reward / advantages, how much an action is).
 
+On top of this common NN , on both Actor and Critic a secondary "head" NN is mounted
+(these two different NNs use shared NN as input layer), and two different loss functions
+are defined.
+
+'''
+
+
+'''
+EpisodeStep represents a single step in an episode.
+'''
 class EpisodeStep:
     def __init__(self, state, action, reward, next_state, done):
         self.state      = state
@@ -20,7 +35,6 @@ class EpisodeStep:
 
 
 class Actor():
-
     def __init__(self, inp_dim, out_dim, base_network, optimizer):
         
         self.inp_dim        = inp_dim
@@ -30,17 +44,28 @@ class Actor():
         hiddenLayer1        = Dense(128, activation='relu') (base_network.output)
         hiddenLayer2        = Dense(64,  activation='relu') (hiddenLayer1)
         agentOutput         = Dense(self.out_dim, activation='softmax') (hiddenLayer2)
-
         self.__model        = Model(base_network.input, agentOutput)
+        
+        #points to input tensor
         self.action_pl      = K.placeholder(shape=(None, self.out_dim))
+        #points to advantages, i.e discounted reward.
         self.advantages_pl  = K.placeholder(shape=(None,))
-   
-        weighted_actions    = K.sum(self.action_pl * self.model().output, axis=1)
-        eligibility         = K.log(weighted_actions + 1e-10) * K.stop_gradient(self.advantages_pl)
-        entropy             = K.sum(self.model().output * K.log(self.model().output + 1e-10), axis=1)
-        loss                = 0.001 * entropy - K.sum(eligibility)
-        updates             = optimizer.get_updates(self.model().trainable_weights, [], loss)
-        self.__opt          = K.function([self.model().input, self.action_pl, self.advantages_pl], [], updates=updates)
+        
+        #network output is multiplied by action input, i.e  a tensor of one-hot-encoded actions.
+        actions_probabilities    = K.sum(self.action_pl * self.model().output, axis=1)
+        # multiply log of probabilities (to which is added a constant, small term to avoid 0-values),
+        # for the value assumed by the advantages vector (K.stop_gradient is needed to treat the tensor as a constant)
+        action_value             = K.log(actions_probabilities + 1e-10) * K.stop_gradient(self.advantages_pl)
+        
+        # Adding an "entropy" term, it should encourage exploration of new actions
+        entropy                  = K.sum(self.model().output * K.log(self.model().output + 1e-10), axis=1)
+
+        # Defining a loss.
+        loss                     = 0.001 * entropy - K.sum(action_value)
+        
+        updates                  = optimizer.get_updates(self.model().trainable_weights, [], loss)
+        
+        self.__opt               = K.function([self.model().input, self.action_pl, self.advantages_pl], [], updates=updates)
         
 
     def optimize(self, inputs):
@@ -66,12 +91,10 @@ class Critic():
         hiddenLayer1        = Dense(128, activation='relu') (base_network.output)
         agentOutput         = Dense(1,   activation='linear') (hiddenLayer1)
 
-
-
         self.__model        = Model(base_network.input, agentOutput) 
         self.discounted_r   = K.placeholder(shape=(None,))
-        critic_loss         = K.mean(K.square(self.discounted_r - self.model().output))
-        updates             = optimizer.get_updates(self.model().trainable_weights, [], critic_loss)
+        loss                = K.mean(K.square(self.discounted_r - self.model().output))
+        updates             = optimizer.get_updates(self.model().trainable_weights, [], loss)
         self.__optimizer    = K.function([self.model().input, self.discounted_r], [], updates=updates)
 
     def optimize(self, inputs):
@@ -88,7 +111,7 @@ class Critic():
 
 
 class A2C:
-    def __init__(self, enviromentName:str, training=True, gamma = 0.99, lr = 0.0001):
+    def __init__(self, enviromentName:str, actor_optimizer, critic_optimizer, training=True, gamma = 0.99, epsilon = 0.0, epsilon_decay=0.9):
      
         self.enviromentName    = enviromentName
         self.env               = gym.make(enviromentName) # creates enviroment using symbolic name
@@ -98,21 +121,24 @@ class A2C:
         
         # Environment and A2C parameters
         
-        self.epsilon        = 0.0
-        self.epsilon_decay  = 0.9
+        self.epsilon        = epsilon
+        self.epsilon_decay  = epsilon_decay
         self.gamma = gamma
-        self.lr = lr
-        # Create actor and critic networks
+        
+        # Create actor and critic networks: first, define a common, shared NN for both components 
+        # of the whole A2C models.
         self.shared = self.__base_network()
-        self.actor  = Actor (self.env_dim,  self.act_dim, self.shared, Adam(lr=0.0001))
-        self.critic = Critic(self.env_dim,  self.act_dim, self.shared, Adam(lr=0.0001))
+        # We could use two different optimizators:
+        self.actor  = Actor (self.env_dim,  self.act_dim, self.shared, actor_optimizer)
+        self.critic = Critic(self.env_dim,  self.act_dim, self.shared, critic_optimizer)
+        
         if not training:
             self.load_weights()
 
 
     def __base_network(self):
         inp       = Input(shape=(self.env_dim,))
-        hidden1   = Dense(64, activation='relu')(inp)
+        hidden1   = Dense(64,  activation='relu')(inp)
         hidden2   = Dense(128, activation='relu')(hidden1)
         return Model(inp, hidden2)
 
