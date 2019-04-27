@@ -28,20 +28,21 @@ def rightMostPosition(episode):
     return maxPos
 
 def stopFunction(results):
-    if len(results) < 100:
+    if len(results) < EVAL_EPISODES:
         return False
-    lastNRuns = results[-100:]
+    lastNRuns = results[-EVAL_EPISODES:]
     solved    = 0
     for run in lastNRuns:
         solved = solved +1 if rightMostPosition(run) > 0.5 else solved
-    return solved / 100 >= 0.9
+    return solved / EVAL_EPISODES >= 0.9
 
 def printStat(results):
     avg = averageOnLast(results,TRAIN_STEP)
+    lastNRuns = results[-TRAIN_STEP:]
     maxPos = -1.2
     cumMaxPos = 0
     solved    = 0
-    for episode in results:
+    for episode in lastNRuns:
         mp = rightMostPosition(episode)
         if mp > 0.5:
             solved += 1
@@ -67,5 +68,6 @@ def train():
     agent.train(stopFunction=stopFunction, trainStep=TRAIN_STEP, numEpisodes=EPISODE_NUMBER, minibatchSize=BATCH_SIZE, customize_reward_function=custReward, progress_log_funct=printStat)
 
 
-play()
+#play()
+train()
 
