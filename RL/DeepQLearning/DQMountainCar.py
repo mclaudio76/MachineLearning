@@ -33,24 +33,39 @@ def stopFunction(results):
     lastNRuns = results[-100:]
     solved    = 0
     for run in lastNRuns:
-        solved = solved +1 if rightMostPosition(run) >= 0.5 else solved
+        solved = solved +1 if rightMostPosition(run) > 0.5 else solved
     return solved / 100 >= 0.9
 
 def printStat(results):
     avg = averageOnLast(results,TRAIN_STEP)
     maxPos = -1.2
+    cumMaxPos = 0
+    solved    = 0
     for episode in results:
-        maxPos = max(maxPos, rightMostPosition(episode))
-    print(" Average score of last ", TRAIN_STEP, " episodes ",avg," max pos ", maxPos) 
+        mp = rightMostPosition(episode)
+        if mp > 0.5:
+            solved += 1
+        maxPos = max(maxPos, mp)
+        cumMaxPos += mp
+    print(" Average score of last ", TRAIN_STEP, " episodes ",avg," max pos ", maxPos, " avg max pos = ", cumMaxPos/TRAIN_STEP, " solved = ",solved) 
 
 def custReward(episodeData):
     for epsStep in episodeData:
         if epsStep.next_state[0] > -0.2:
             epsStep.reward = 1
 
+def play():
+    agent = DQAgent('MountainCar-v0',memoryBufferSize=100000, epsilon_decay=0.7, train=False,DDQEnabled=DDQEnabled)
+    data = agent.playSingleEpisode(render=True)
+    d    = list()
+    d.append(data)
+    rew = sumReward ( d, 1 )
+    print(" Reward = ",rew)
+
+def train():
+    agent = DQAgent('MountainCar-v0',memoryBufferSize=100000, epsilon_decay=0.95, train=True, DDQEnabled=False)
+    agent.train(stopFunction=stopFunction, trainStep=TRAIN_STEP, numEpisodes=EPISODE_NUMBER, minibatchSize=BATCH_SIZE, customize_reward_function=custReward, progress_log_funct=printStat)
 
 
-agent = DQAgent('MountainCar-v0',memoryBufferSize=100000, epsilon_decay=0.95, train=True, DDQEnabled=False)
-agent.train(stopFunction=stopFunction, trainStep=TRAIN_STEP, numEpisodes=EPISODE_NUMBER, minibatchSize=BATCH_SIZE, customize_reward_function=custReward, progress_log_funct=printStat)
-
+play()
 

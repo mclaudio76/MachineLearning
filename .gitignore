@@ -329,3 +329,6 @@ ASALocalRun/
 
 # MFractors (Xamarin productivity tool) working folder 
 .mfractor/
+DQMountainCar-v0-agent.hdf5
+RL/DeepQLearning/DQMountainCar-v0-agent.hdf5
+RL/DeepQLearning/DQMountainCar-v0-agent.sav
