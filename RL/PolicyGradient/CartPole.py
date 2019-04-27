@@ -18,7 +18,7 @@ def main():
             print(" Episode ", episode, " reward ", totalReward)
 
 
-    a2c = A2C('CartPole-v1', actor_optimizer=Adam(lr=0.0001), critic_optimizer=Adam(lr=0.002), epsilon=0.1, epsilon_decay=0.9)
+    a2c = A2C('CartPole-v1', actor_optimizer=Adam(lr=0.0001), critic_optimizer=Adam(lr=0.0002), epsilon=0.1, epsilon_decay=0.9)
     a2c.train(logger=logInfo, trainEndedEvaluator= trainEndedEvaluator)
 
 main()
