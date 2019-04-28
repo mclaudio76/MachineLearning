@@ -32,7 +32,7 @@ class EpisodeStep:
 
 class DQBreakOut:
     
-    def __init__(self, enviromentName: str, memoryBufferSize: int, epsilon = 0.0, epsilon_decay=0.95, discount_factor = 0.95, train=True, DDQEnabled=False):
+    def __init__(self, enviromentName: str, memoryBufferSize: int, epsilon = 1.0, epsilon_decay=0.95, discount_factor = 0.95, train=True, DDQEnabled=False):
         
         self.enviromentName    = enviromentName
         self.env = gym.make(enviromentName) # creates enviroment using symbolic name
@@ -202,11 +202,11 @@ class DQBreakOut:
             self.pushToMemory(episodeData)        
             minibatch = random.sample(self.memory, min(len(self.memory), minibatchSize))
             self.batch_train(minibatch)
+            if progress_log_funct != None:
+                   progress_log_funct(results)
             if currentEpisode > 0 and currentEpisode % trainStep == 0:
                 print("[Episode ", currentEpisode, "/",numEpisodes,"] ",end='\n' if progress_log_funct==None else ' ')
                 self.saveModels()
-                if progress_log_funct != None:
-                   progress_log_funct(results)
                 self.epsilon *= self.epsilon_decay
                 self.epsilon  = 0 if self.epsilon < 0.001 else self.epsilon
             if currentEpisode > 0 and currentEpisode % swapStep == 0:    
@@ -219,15 +219,16 @@ class DQBreakOut:
 def main():
 
     def progress_log_funct(results):
-        lastN = results[-10:]
-        totalScore = 0
-        for run in lastN:
-            for eps in run:
-                totalScore += eps.reward
-        print(" Avg score ", totalScore / 10)
+        if len(results) % 10 == 0:
+            lastN = results[-10:]
+            totalScore = 0
+            for run in lastN:
+                for eps in run:
+                    totalScore += eps.reward
+            print(" Avg score  on last 10 games", totalScore / 10)
 
     agent = DQBreakOut(enviromentName='BreakoutDeterministic-v4', memoryBufferSize=100000, DDQEnabled=True)
-    agent.train(trainStep=10,swapStep=1000, numEpisodes=100000, minibatchSize=32, progress_log_funct=progress_log_funct)
+    agent.train(trainStep=100,swapStep=1000, numEpisodes=100000, minibatchSize=32, progress_log_funct=progress_log_funct)
     #agent.playSingleEpisode(render=True)
 
 main()
