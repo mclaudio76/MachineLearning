@@ -11,24 +11,6 @@ from keras.layers import Input, Dense, Flatten
 from keras.optimizers import Adam, RMSprop
 from collections      import deque   
 
-'''
-Implementation of a Policy-Gradient based Deep RL, using A2C 
-(advantage actor critic model.)
-In A2C model, we define a common NN which is shared between the "actor" (i.e the model
-that actually chooses which action to perform, following the policy p) and the "critic"
-(i.e the model that evaluates, in terms of reward / advantages, how much an action is).
-
-On top of this common NN , on both Actor and Critic a secondary "head" NN is mounted
-(these two different NNs use shared NN as input layer), and two different loss functions
-are defined.
-
-'''
-
-
-'''
-EpisodeStep represents a single step in an episode.
-'''
-
 tensorFlowGraph = None
 
 class History:
@@ -170,13 +152,13 @@ class Mind():
 
 class Agent():
 
-    def __init__(self, env, mind, threadName):
+    def __init__(self, env, mind, rewardMapper=None, epsilon=1.0):
         self.mind              = mind
         self.env               = env
-        self.epsilon           = 0.1
+        self.epsilon           = epsilon
         self.epsilon_decay     = 0.9
         self.episodesPlayed    = 0
-        self.threadName        = threadName
+        self.rewardMapper      = rewardMapper
 
     def playSingleEpisode(self, render=False):
         episodeData = list()
@@ -189,12 +171,18 @@ class Agent():
             else:
                 action = self.mind.selectAction(state)
             next_state, reward, done, __ = self.env.step(action)
+
             if render:
                 self.env.render()
             step                         = EpisodeStep(state, action, reward,next_state, done)
+
             episodeReward += reward
             episodeData.append(step)
             state = next_state
+        
+        if self.rewardMapper != None:
+            self.rewardMapper(episodeData)
+
         self.mind.pushData(episodeData)
         self.episodesPlayed += 1
         if self.episodesPlayed == 10:
@@ -233,7 +221,7 @@ class A3C:
         def stop(self):
             self.stop_signal = True
 
-    def __init__(self, envName):
+    def __init__(self, envName, numThreads=3):
         self.lock_queue        = threading.Lock()
         self.enviromentName    = envName
         self.env               = gym.make(envName) # creates enviroment using symbolic name
@@ -242,27 +230,31 @@ class A3C:
         self.act_dim           = self.env.action_space.n 
         self.mind              = Mind(self.env_dim, self.act_dim, policyOptimizer=Adam(lr=0.0001), criticOptimizer=Adam(lr=0.0002))
         self.optimizer         = A3C.OptimizerThread(self.mind)
+        self.numThreads        = numThreads
         self.results           = History()
         global tensorFlowGraph
         tensorFlowGraph        = K.get_session().graph
         
 
-    def train(self, stopCriterion, numEpisodes = 10000, trainStep=100, remapRewardFunction=None, logger=None):
-        # Main Loop
+    def train(self, stopCriterion, numEpisodes = 10000, trainStep=1000, remapRewardFunction=None, epsilon=1.0):
         self.optimizer.start()
-        agents = [A3C.AgentThread(  Agent(gym.make(self.enviromentName), 
-                                                 self.mind,
-                                                 "Thread #"+str(i))  , self.results   ) for i in range(5)]
-        for agent in agents:
-            agent.start()
+        agents = list()
+        for __ in range(self.numThreads) :
+            agent = Agent(gym.make(self.enviromentName), self.mind,  rewardMapper=remapRewardFunction, epsilon=epsilon)     
+            agThread =  A3C.AgentThread( agent, self.results )
+            agThread.start()
+            agents.append(agThread)
         done = False
         while not done:
             time.sleep(10)
             done = stopCriterion(list(self.results.results))
+        self.optimizer.stop()
+        for agent in agents:
+            agent.stop()
+        self.mind.save(self.enviromentName)
 
 
-def main():
-    
+def mainCartPole():
     def trainEndedEvaluator(episodeList):
         if len(episodeList) < 100:
             return False
@@ -272,19 +264,37 @@ def main():
             for item in episode:
                 sumRew += item.reward
         avg = sumRew / len(actualList)
-        print(" Average after ", len(episodeList), " episodes is ", avg)
+        print(" Average reward  ", avg)
         return avg > 450
+   
+    a3c = A3C('CartPole-v1',numThreads=4)
+    a3c.train(stopCriterion= trainEndedEvaluator)
+
+def mainMountain():
+
+    def trainEndedEvaluator(episodeList):
+        if len(episodeList) < 100:
+            return False
+        actualList = episodeList[-100:]
+        sumRew = 0
+        solved = 0
+        for episode in actualList:
+            for item in episode:
+                sumRew += item.reward
+                if item.next_state[0] >= 0.5:
+                    solved += 1
+        avg = sumRew / len(actualList)
+        print(" Average reward  ", avg, "Solved = ", solved)
+        return solved / 100.0 > 0.9
     
-    def logInfo(episode, runData):
-        if episode % 50 == 0:
-            totalReward = 0
-            for eps in runData:
-                totalReward += eps.reward
-            print(" Episode ", episode, " reward ", totalReward)
+    def remapReward(episodeData):
+        for eps in episodeData:
+            if eps.next_state[0] > -0.2:
+                eps.reward = 1
+       
+    a3c = A3C('MountainCar-v0',numThreads=6)
+    a3c.train(stopCriterion= trainEndedEvaluator,remapRewardFunction=remapReward)
 
 
-    a2c = A3C('CartPole-v1')
-    a2c.train(logger=logInfo, stopCriterion= trainEndedEvaluator)
-
-main()
+mainMountain()
 
