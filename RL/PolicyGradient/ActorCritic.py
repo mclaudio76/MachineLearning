@@ -8,23 +8,7 @@ from keras.utils import to_categorical
 from keras.layers import Input, Dense, Flatten
 import math
 
-'''
-Implementation of a Policy-Gradient based Deep RL, using A2C 
-(advantage actor critic model.)
-In A2C model, we define a common NN which is shared between the "actor" (i.e the model
-that actually chooses which action to perform, following the policy p) and the "critic"
-(i.e the model that evaluates, in terms of reward / advantages, how much an action is).
 
-On top of this common NN , on both Actor and Critic a secondary "head" NN is mounted
-(these two different NNs use shared NN as input layer), and two different loss functions
-are defined.
-
-'''
-
-
-'''
-EpisodeStep represents a single step in an episode.
-'''
 class EpisodeStep:
     def __init__(self, state, action, reward, next_state, done):
         self.state      = state
