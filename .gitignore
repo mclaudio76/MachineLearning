@@ -335,3 +335,5 @@ RL/DeepQLearning/DQMountainCar-v0-agent.sav
 RL/DeepQLearning/DQMountainCar-v0-agent.hdf5
 RL/BreakOut/DDQBreakoutDeterministic-v4-agent.hdf5
 RL/BreakOut/DDQBreakoutDeterministic-v4-qvalue.hdf5
+CartPole-v1-critic.model
+CartPole-v1-policy.model
