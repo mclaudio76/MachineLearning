@@ -62,14 +62,15 @@ class DQBreakOut:
 
         if not self.trainingMode:
             self.loadModels()
+        self.agent_model.summary()
   
     def __buildModel(self, convNet, output_size):
-        hLayer1 = Dense(256, activation='relu')(convNet.output)
-        hLayer2 = Dense(128, activation='relu')(hLayer1)
-        hLayer3 = Dense(64, activation='relu')(hLayer2)
+        hLayer1 = Dense(256, activation='relu' , kernel_initializer='he_uniform')(convNet.output)
+        hLayer2 = Dense(128, activation='relu' , kernel_initializer='he_uniform')(hLayer1)
+        hLayer3 = Dense(64, activation='relu' , kernel_initializer='he_uniform')(hLayer2)
         output  = Dense(output_size, activation='linear')(hLayer3)
         model   = Model(inputs=convNet.input, outputs=output)
-        optimizer = Adam(lr=0.0001) 
+        optimizer = RMSprop(lr=0.005)
         model.compile(loss='mse', optimizer=optimizer)
         return model
     
@@ -77,9 +78,9 @@ class DQBreakOut:
          # With the functional API we need to define the inputs.
         frames_input = Input(shape=(FRAME_WIDTH, FRAME_HEIGHT, STATE_LENGTH), name='frames')
         normalized   = Lambda(lambda x: x / 255.0)(frames_input)
-        conv_1       = Convolution2D( 16, (8, 8) , strides=(4, 4), activation='relu')(normalized)
+        conv_1       = Convolution2D( 16, (8, 8) , strides=(4, 4), activation='relu', kernel_initializer='he_uniform')(normalized)
         # "The second hidden layer convolves 32 4×4 filters with stride 2, again followed by a rectifier nonlinearity."
-        conv_2       = Convolution2D(32, (4, 4), strides=(2, 2), activation='relu')(conv_1)
+        conv_2       = Convolution2D(32, (4, 4), strides=(2, 2), activation='relu', kernel_initializer='he_uniform')(conv_1)
         # Flattening the second convolutional layer.
         conv_flattened = Flatten()(conv_2)
         # "The final hidden layer is fully-connected and consists of 256 rectifier units."
@@ -175,15 +176,18 @@ class DQBreakOut:
             next_state, reward, done, info = self.env.step(action)
             if render:
                 self.env.render()
+                time.sleep(0.2)
             next_state                   = self.preprocessState(next_state)
             history_next_state           = self.augmentState(next_state, episodeData)
             step                         = EpisodeStep(history_state, action, reward, history_next_state, done)
-            episodeData.append(step)
-            history_state = history_next_state
             if info['ale.lives']  < lives:
                 lives =   info['ale.lives']
-                self.env.step(1)
-            
+                step.reward = -10 
+             #   self.env.step(1)
+                done = True
+            episodeData.append(step)
+            history_state = history_next_state
+           
         return episodeData
 
 
@@ -195,7 +199,7 @@ class DQBreakOut:
     def train(self, trainStep = 100, swapStep  = 100, numEpisodes=10000, minibatchSize=1000, customize_reward_function = None, progress_log_funct = None):
         results = list()
         for currentEpisode in range(numEpisodes):
-            episodeData = self.playSingleEpisode(render=False)
+            episodeData = self.playSingleEpisode(render=currentEpisode % trainStep == 0)
             if customize_reward_function != None:
                 customize_reward_function(episodeData)
             results.append(episodeData)
@@ -205,7 +209,7 @@ class DQBreakOut:
             if progress_log_funct != None:
                    progress_log_funct(results)
             if currentEpisode > 0 and currentEpisode % trainStep == 0:
-                print("[Episode ", currentEpisode, "/",numEpisodes,"] ",end='\n' if progress_log_funct==None else ' ')
+                print("[Episode ", currentEpisode, "/",numEpisodes,"]; epsilon ", self.epsilon,end='\n' if progress_log_funct==None else ' ')
                 self.saveModels()
                 self.epsilon *= self.epsilon_decay
                 self.epsilon  = 0 if self.epsilon < 0.001 else self.epsilon
@@ -227,8 +231,8 @@ def main():
                     totalScore += eps.reward
             print(" Avg score  on last 10 games", totalScore / 10)
 
-    agent = DQBreakOut(enviromentName='BreakoutDeterministic-v4', memoryBufferSize=100000, DDQEnabled=True)
-    agent.train(trainStep=100,swapStep=1000, numEpisodes=100000, minibatchSize=32, progress_log_funct=progress_log_funct)
+    agent = DQBreakOut(enviromentName='BreakoutDeterministic-v4', memoryBufferSize=100000, DDQEnabled=True, train=True)
+    agent.train(trainStep=100,swapStep=4, numEpisodes=100000, minibatchSize=64, progress_log_funct=progress_log_funct)
     #agent.playSingleEpisode(render=True)
 
 main()

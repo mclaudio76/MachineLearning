@@ -89,9 +89,9 @@ class Critic():
 
 
         hiddenLayer1        = Dense(128, activation='relu') (base_network.output)
-        agentOutput         = Dense(1,   activation='linear') (hiddenLayer1)
+        criticOutput        = Dense(1,   activation='linear') (hiddenLayer1)
 
-        self.__model        = Model(base_network.input, agentOutput) 
+        self.__model        = Model(base_network.input, criticOutput) 
         self.discounted_r   = K.placeholder(shape=(None,))
         loss                = K.mean(K.square(self.discounted_r - self.model().output))
         updates             = optimizer.get_updates(self.model().trainable_weights, [], loss)
