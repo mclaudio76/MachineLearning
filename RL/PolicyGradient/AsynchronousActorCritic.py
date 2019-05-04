@@ -13,10 +13,39 @@ from collections      import deque
 
 tensorFlowGraph = None
 
+class Enviroment:
+
+    def __init__(self, envName):
+        self.envName = envName
+        self.env      = gym.make(envName) 
+        self.env.reset()       
+        self.env_dim           = self.env.observation_space.shape[0]
+        self.act_dim           = self.env.action_space.n 
+
+    def reset(self):
+        return self.env.reset()
+
+    def envDim(self):
+        return self.env_dim
+    
+    def actDim(self):
+        return self.act_dim
+
+    def step(self, action):
+        return self.env.step(action)
+
+    def randomAction(self):
+        return self.env.action_space.sample()
+    
+    def render(self, display=False):
+        if display:
+            self.env.render()
+
+
 class History:
     def __init__(self):
         self.lock_queue        = threading.Lock()
-        self.results           = deque(maxlen=1000)
+        self.results           = deque(maxlen=100000)
 
     def registerResult(self,episodeData):
         with self.lock_queue:
@@ -25,11 +54,20 @@ class History:
 
 class EpisodeStep:
     def __init__(self, state, action, reward, next_state, done):
-        self.state      = state
+        self.velocity_state_array = np.linspace(-0.07, +0.07, num=3, endpoint=False)
+        self.position_state_array = np.linspace(-1.2, +0.6,   num=40, endpoint=False)
+        
+        self.orig_state      = state
+        self.orig_next_state = next_state
+       
+        self.state      = self.remapState(state)
         self.action     = action
         self.reward     = reward
-        self.next_state = next_state
+        self.next_state = self.remapState(next_state)
         self.done       = done
+
+    def remapState(self, state):
+        return np.array([np.digitize(state[0], self.position_state_array), np.digitize(state[1], self.velocity_state_array)])
 
 
 class Mind():
@@ -167,15 +205,12 @@ class Agent():
         episodeReward = 0
         while not done:
             if np.random.random() < self.epsilon or self.mind.trained == False:
-                action =  self.env.action_space.sample()
+                action =  self.env.randomAction() #self.env.action_space.sample()
             else:
                 action = self.mind.selectAction(state)
             next_state, reward, done, __ = self.env.step(action)
-
-            if render:
-                self.env.render()
+            self.env.render(render)
             step                         = EpisodeStep(state, action, reward,next_state, done)
-
             episodeReward += reward
             episodeData.append(step)
             state = next_state
@@ -224,11 +259,9 @@ class A3C:
     def __init__(self, envName, numThreads=3):
         self.lock_queue        = threading.Lock()
         self.enviromentName    = envName
-        self.env               = gym.make(envName) # creates enviroment using symbolic name
-        self.env.reset()         # reset enviroments
-        self.env_dim           = self.env.observation_space.shape[0]
-        self.act_dim           = self.env.action_space.n 
-        self.mind              = Mind(self.env_dim, self.act_dim, policyOptimizer=Adam(lr=0.0001), criticOptimizer=Adam(lr=0.0002))
+        
+        self.env               = Enviroment(envName)
+        self.mind              = Mind(self.env.envDim(), self.env.actDim(), policyOptimizer=Adam(lr=0.0001), criticOptimizer=Adam(lr=0.0002))
         self.optimizer         = A3C.OptimizerThread(self.mind)
         self.numThreads        = numThreads
         self.results           = History()
@@ -240,7 +273,8 @@ class A3C:
         self.optimizer.start()
         agents = list()
         for __ in range(self.numThreads) :
-            agent = Agent(gym.make(self.enviromentName), self.mind,  rewardMapper=remapRewardFunction, epsilon=epsilon)     
+            #agent = Agent(gym.make(self.enviromentName), self.mind,  rewardMapper=remapRewardFunction, epsilon=epsilon)     
+            agent = Agent(Enviroment(self.enviromentName), self.mind,  rewardMapper=remapRewardFunction, epsilon=epsilon)     
             agThread =  A3C.AgentThread( agent, self.results )
             agThread.start()
             agents.append(agThread)
@@ -281,7 +315,7 @@ def mainMountain():
         for episode in actualList:
             for item in episode:
                 sumRew += item.reward
-                if item.next_state[0] >= 0.5:
+                if item.orig_next_state[0] >= 0.5:
                     solved += 1
         avg = sumRew / len(actualList)
         print(" Average reward  ", avg, "Solved = ", solved)
@@ -289,7 +323,7 @@ def mainMountain():
     
     def remapReward(episodeData):
         for eps in episodeData:
-            if eps.next_state[0] > -0.2:
+            if eps.next_state[0] != eps.state[0] :
                 eps.reward = 1
        
     a3c = A3C('MountainCar-v0',numThreads=6)
