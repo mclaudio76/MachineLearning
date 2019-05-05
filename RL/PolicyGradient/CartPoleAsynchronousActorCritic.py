@@ -1,76 +1,24 @@
 import random
 import numpy as np
-import gym
+
 import tensorflow as tf
 import keras.backend as K
 import math,threading,time
+
 from keras.models import Model
 from keras import regularizers
 from keras.utils import to_categorical
 from keras.layers import Input, Dense, Flatten
 from keras.optimizers import Adam, SGD
 from collections      import deque   
+from Commons          import Enviroment,EpisodeStep, History
+
 
 tensorFlowGraph = None
 totalEpisodes   = 0
 bestRewardSoFar = None
 goal_position   = -0.2
 
-class Enviroment:
-
-    def __init__(self, envName):
-        self.envName = envName
-        self.env      = gym.make(envName)
-        self.env.reset()       
-        self.env_dim           = self.env.observation_space.shape[0]
-        self.act_dim           = self.env.action_space.n 
-
-    def reset(self):
-        return self.env.reset()
-
-    def envDim(self):
-        return self.env_dim
-    
-    def actDim(self):
-        return self.act_dim
-
-    def step(self, action):
-        return self.env.step(action)
-
-    def randomAction(self):
-        return self.env.action_space.sample()
-    
-    def render(self, display=False):
-        if display:
-            self.env.render()
-
-
-class History:
-    def __init__(self):
-        self.lock_queue        = threading.Lock()
-        self.results           = deque(maxlen=1000000)
-
-    def registerResult(self,episodeData):
-        with self.lock_queue:
-           self.results.append(episodeData)
-
-
-class EpisodeStep:
-    def __init__(self, state, action, reward, next_state, done):
-        self.velocity_state_array = np.linspace(-0.07, +0.07, num=3, endpoint=False)
-        self.position_state_array = np.linspace(-1.2, +0.6,   num=40, endpoint=False)
-        
-        self.orig_state      = state
-        self.orig_next_state = next_state
-       
-        self.state      = self.remapState(state)
-        self.action     = action
-        self.reward     = reward
-        self.next_state = self.remapState(next_state)
-        self.done       = done
-
-    def remapState(self, state):
-        return state #np.array([np.digitize(state[0], self.position_state_array), np.digitize(state[1], self.velocity_state_array)])
 
 
 class Mind():
@@ -204,6 +152,7 @@ class Agent():
         self.rewardMapper      = rewardMapper
 
     def playSingleEpisode(self, render=False):
+        global totalEpisodes
         episodeData = list()
         state       = self.env.reset()
         done        = False
@@ -219,19 +168,13 @@ class Agent():
             episodeReward += reward
             episodeData.append(step)
             state = next_state
-        global totalEpisodes
         if self.rewardMapper != None:
             self.rewardMapper(episodeData)
-        if self.goodEpisode(episodeData):
-            totalEpisodes       += 1
-            self.mind.pushData(episodeData)
-            self.epsilon        *= self.epsilon_decay
-            self.epsilon         = 0.0 if self.epsilon < 0.001 else self.epsilon
-            return episodeData
-        return None
-    
-    def goodEpisode(self, episodeData):
-        return True
+        totalEpisodes       += 1
+        self.mind.pushData(episodeData)
+        self.epsilon        *= self.epsilon_decay
+        self.epsilon         = 0.0 if self.epsilon < 0.001 else self.epsilon
+        return episodeData
 
 class A3C:
    
@@ -268,7 +211,7 @@ class A3C:
         self.enviromentName    = envName
         
         self.env               = Enviroment(envName)
-        self.mind              = Mind(self.env.envDim(), self.env.actDim(), policyOptimizer=Adam(lr=0.001), criticOptimizer=Adam(lr=0.001))
+        self.mind              = Mind(self.env.envDim(), self.env.actDim(), policyOptimizer=Adam(lr=0.001), criticOptimizer=Adam(lr=0.0001))
         self.optimizer         = A3C.OptimizerThread(self.mind)
         self.numThreads        = numThreads
         self.results           = History()
@@ -280,7 +223,6 @@ class A3C:
         self.optimizer.start()
         agents = list()
         for __ in range(self.numThreads) :
-            #agent = Agent(gym.make(self.enviromentName), self.mind,  rewardMapper=remapRewardFunction, epsilon=epsilon)     
             agent = Agent(Enviroment(self.enviromentName), self.mind,  rewardMapper=remapRewardFunction, epsilon=epsilon)     
             agThread =  A3C.AgentThread( agent, self.results )
             agThread.start()
@@ -297,6 +239,7 @@ class A3C:
 # Examples
 
 def mainCartPole():
+
     def trainEndedEvaluator(episodeList):
         if len(episodeList) < 100:
             return False
@@ -312,62 +255,7 @@ def mainCartPole():
     a3c = A3C('CartPole-v1',numThreads=4)
     a3c.train(stopCriterion= trainEndedEvaluator)
 
-def mainMountain():
 
-    def trainEndedEvaluator(episodeList):
-        if len(episodeList) < 10:
-            return False
-        global totalEpisodes
-        global goal_position
-        global bestRewardSoFar
-        actualList = episodeList[-10:]
-        sumRew = 0
-        solved = 0
-        minP    = 100
-        maxP    = -100
-        velocity = 0.0
-        for episode in actualList:
-            for item in episode:
-                sumRew += item.reward
-                position = item.next_state[0]
-                velocity += item.next_state[1]
-                minP     = min(minP, position)
-                maxP     = max(maxP, position)
-                if position >= goal_position:
-                    solved += 1
-        avg = sumRew / len(actualList)
-        avgSpeed = velocity / (len(actualList) * 200)
-        bestRewardSoFar = avg
-        print("Goal position ", goal_position, " Average reward  after ", totalEpisodes, " episodes is ", avg, "Solved = ", solved, " best range (",minP, ", ", maxP,") , avg speed ",avgSpeed)
-        if solved / 10.0 > 0.9:
-            if goal_position >= 0.5:
-                return True
-            else:
-                goal_position += 0.05
-                print("Moving goal position to ", goal_position)
-                return False
-    
-    def remapReward(episodeData):
-        x0          = -0.5 
-        changes     = 0
-        lastAction  = None
-        global goal_position
-        for eps in episodeData:
-            if lastAction == None or eps.action != lastAction:
-                lastAction = eps.action
-                changes   += 1
-            position = eps.next_state[0]
-            velocity = eps.next_state[1] 
-            multiplier = 1.1 if position >= -0.2  else 1
-            potential = abs(position - x0) * multiplier
-            kinetic   = ((velocity * 10) ** 2) * 0.5
-            eps.reward = potential + kinetic
-            if position >= goal_position:
-                eps.reward = 10
-        for eps in episodeData:
-            eps.reward /= changes
-    a3c = A3C('MountainCar-v0',numThreads=6)
-    a3c.train(stopCriterion= trainEndedEvaluator,remapRewardFunction=remapReward, epsilon=1.0)
 
 
 mainCartPole()
