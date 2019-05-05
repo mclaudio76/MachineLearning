@@ -8,16 +8,19 @@ from keras.models import Model
 from keras import regularizers
 from keras.utils import to_categorical
 from keras.layers import Input, Dense, Flatten
-from keras.optimizers import Adam, RMSprop
+from keras.optimizers import Adam, SGD
 from collections      import deque   
 
 tensorFlowGraph = None
+totalEpisodes   = 0
+bestRewardSoFar = None
+goal_position   = -0.2
 
 class Enviroment:
 
     def __init__(self, envName):
         self.envName = envName
-        self.env      = gym.make(envName) 
+        self.env      = gym.make(envName)
         self.env.reset()       
         self.env_dim           = self.env.observation_space.shape[0]
         self.act_dim           = self.env.action_space.n 
@@ -45,7 +48,7 @@ class Enviroment:
 class History:
     def __init__(self):
         self.lock_queue        = threading.Lock()
-        self.results           = deque(maxlen=100000)
+        self.results           = deque(maxlen=1000000)
 
     def registerResult(self,episodeData):
         with self.lock_queue:
@@ -67,7 +70,7 @@ class EpisodeStep:
         self.done       = done
 
     def remapState(self, state):
-        return np.array([np.digitize(state[0], self.position_state_array), np.digitize(state[1], self.velocity_state_array)])
+        return state #np.array([np.digitize(state[0], self.position_state_array), np.digitize(state[1], self.velocity_state_array)])
 
 
 class Mind():
@@ -89,13 +92,13 @@ class Mind():
 
     def __base_network(self):
         inp       = Input(shape=(self.env_dim,))
-        hidden1   = Dense(64,  activation='relu')(inp)
-        hidden2   = Dense(128, activation='relu')(hidden1)
+        hidden1   = Dense(32,  activation='relu')(inp)
+        hidden2   = Dense(64, activation='relu')(hidden1)
         return Model(inp, hidden2)
         
     def __initializePolicyNetwork(self, optimizer):
         hiddenLayer1        = Dense(128, activation='relu') (self.__inputNet.output)
-        hiddenLayer2        = Dense(64,  activation='relu') (hiddenLayer1)
+        hiddenLayer2        = Dense(32,  activation='relu') (hiddenLayer1)
         policyOutput        = Dense(self.act_dim, activation='softmax') (hiddenLayer2)
         self.__policyModel  = Model(self.__inputNet.input, policyOutput)
         
@@ -121,8 +124,10 @@ class Mind():
         self.__optPolicy        = K.function([self.policyModel().input, self.action_pl, self.advantages_pl], [], updates=updates)
     
     def __initializeCriticModel(self, optimizer):
-        hiddenLayer1        = Dense(128, activation='relu') (self.__inputNet.output)
-        criticOutput        = Dense(1,   activation='linear') (hiddenLayer1)
+        hiddenLayer1        = Dense(64, activation='relu') (self.__inputNet.output)
+        hiddenLayer2        = Dense(32, activation='relu') (hiddenLayer1)
+        hiddenLayer3        = Dense(12, activation='relu') (hiddenLayer2)
+        criticOutput        = Dense(1,   activation='linear') (hiddenLayer3)
         self.__criticModel  = Model(self.__inputNet.input, criticOutput) 
         self.discounted_r   = K.placeholder(shape=(None,))
         loss                = K.mean(K.square(self.discounted_r - self.criticModel().output))
@@ -145,7 +150,7 @@ class Mind():
         actions = []
         rewards = []
         with self.lock_queue:
-            if len(self.episodes) > 0:
+            while len(self.episodes) > 0:
                 episodeData = self.episodes.pop()
                 for eps in episodeData :
                     states.append(eps.state)
@@ -214,18 +219,19 @@ class Agent():
             episodeReward += reward
             episodeData.append(step)
             state = next_state
-        
+        global totalEpisodes
         if self.rewardMapper != None:
             self.rewardMapper(episodeData)
-
-        self.mind.pushData(episodeData)
-        self.episodesPlayed += 1
-        if self.episodesPlayed == 10:
+        if self.goodEpisode(episodeData):
+            totalEpisodes       += 1
+            self.mind.pushData(episodeData)
             self.epsilon        *= self.epsilon_decay
             self.epsilon         = 0.0 if self.epsilon < 0.001 else self.epsilon
-            self.episodesPlayed  = 0
-        return episodeData
+            return episodeData
+        return None
     
+    def goodEpisode(self, episodeData):
+        return True
 
 class A3C:
    
@@ -251,7 +257,8 @@ class A3C:
         def run(self):
             while not self.stop_signal:
                 result = self.agent.playSingleEpisode()
-                self.history.registerResult(result)
+                if result != None:
+                    self.history.registerResult(result)
 
         def stop(self):
             self.stop_signal = True
@@ -261,7 +268,7 @@ class A3C:
         self.enviromentName    = envName
         
         self.env               = Enviroment(envName)
-        self.mind              = Mind(self.env.envDim(), self.env.actDim(), policyOptimizer=Adam(lr=0.0001), criticOptimizer=Adam(lr=0.0002))
+        self.mind              = Mind(self.env.envDim(), self.env.actDim(), policyOptimizer=Adam(lr=0.001), criticOptimizer=Adam(lr=0.001))
         self.optimizer         = A3C.OptimizerThread(self.mind)
         self.numThreads        = numThreads
         self.results           = History()
@@ -287,6 +294,7 @@ class A3C:
             agent.stop()
         self.mind.save(self.enviromentName)
 
+# Examples
 
 def mainCartPole():
     def trainEndedEvaluator(episodeList):
@@ -307,28 +315,60 @@ def mainCartPole():
 def mainMountain():
 
     def trainEndedEvaluator(episodeList):
-        if len(episodeList) < 100:
+        if len(episodeList) < 10:
             return False
-        actualList = episodeList[-100:]
+        global totalEpisodes
+        global goal_position
+        global bestRewardSoFar
+        actualList = episodeList[-10:]
         sumRew = 0
         solved = 0
+        minP    = 100
+        maxP    = -100
+        velocity = 0.0
         for episode in actualList:
             for item in episode:
                 sumRew += item.reward
-                if item.orig_next_state[0] >= 0.5:
+                position = item.next_state[0]
+                velocity += item.next_state[1]
+                minP     = min(minP, position)
+                maxP     = max(maxP, position)
+                if position >= goal_position:
                     solved += 1
         avg = sumRew / len(actualList)
-        print(" Average reward  ", avg, "Solved = ", solved)
-        return solved / 100.0 > 0.9
+        avgSpeed = velocity / (len(actualList) * 200)
+        bestRewardSoFar = avg
+        print("Goal position ", goal_position, " Average reward  after ", totalEpisodes, " episodes is ", avg, "Solved = ", solved, " best range (",minP, ", ", maxP,") , avg speed ",avgSpeed)
+        if solved / 10.0 > 0.9:
+            if goal_position >= 0.5:
+                return True
+            else:
+                goal_position += 0.05
+                print("Moving goal position to ", goal_position)
+                return False
     
     def remapReward(episodeData):
+        x0          = -0.5 
+        changes     = 0
+        lastAction  = None
+        global goal_position
         for eps in episodeData:
-            if eps.next_state[0] != eps.state[0] :
-                eps.reward = 1
-       
+            if lastAction == None or eps.action != lastAction:
+                lastAction = eps.action
+                changes   += 1
+            position = eps.next_state[0]
+            velocity = eps.next_state[1] 
+            multiplier = 1.1 if position >= -0.2  else 1
+            potential = abs(position - x0) * multiplier
+            kinetic   = ((velocity * 10) ** 2) * 0.5
+            eps.reward = potential + kinetic
+            if position >= goal_position:
+                eps.reward = 10
+        for eps in episodeData:
+            eps.reward /= changes
     a3c = A3C('MountainCar-v0',numThreads=6)
-    a3c.train(stopCriterion= trainEndedEvaluator,remapRewardFunction=remapReward)
+    a3c.train(stopCriterion= trainEndedEvaluator,remapRewardFunction=remapReward, epsilon=1.0)
 
 
-mainMountain()
+mainCartPole()
 
