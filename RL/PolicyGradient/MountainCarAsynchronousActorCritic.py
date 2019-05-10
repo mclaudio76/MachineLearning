@@ -7,70 +7,16 @@ import math,threading,time
 from keras.models import Model
 from keras import regularizers
 from keras.utils import to_categorical
-from keras.layers import Input, Dense, Flatten
+from keras.layers import Input, Dense, Flatten,LSTM
 from keras.optimizers import Adam, SGD
-from collections      import deque   
-
+from Commons          import Enviroment,EpisodeStep, History
+import matplotlib.pyplot as plt
+ 
 tensorFlowGraph = None
 totalEpisodes   = 0
 bestRewardSoFar = None
-goal_position   = -0.2
+goal_position   = 0.5
 
-class Enviroment:
-
-    def __init__(self, envName):
-        self.envName = envName
-        self.env      = gym.make(envName)
-        self.env.reset()       
-        self.env_dim           = self.env.observation_space.shape[0]
-        self.act_dim           = self.env.action_space.n 
-
-    def reset(self):
-        return self.env.reset()
-
-    def envDim(self):
-        return self.env_dim
-    
-    def actDim(self):
-        return self.act_dim
-
-    def step(self, action):
-        return self.env.step(action)
-
-    def randomAction(self):
-        return self.env.action_space.sample()
-    
-    def render(self, display=False):
-        if display:
-            self.env.render()
-
-
-class History:
-    def __init__(self):
-        self.lock_queue        = threading.Lock()
-        self.results           = deque(maxlen=1000000)
-
-    def registerResult(self,episodeData):
-        with self.lock_queue:
-           self.results.append(episodeData)
-
-
-class EpisodeStep:
-    def __init__(self, state, action, reward, next_state, done):
-        self.velocity_state_array = np.linspace(-0.07, +0.07, num=3, endpoint=False)
-        self.position_state_array = np.linspace(-1.2, +0.6,   num=40, endpoint=False)
-        
-        self.orig_state      = state
-        self.orig_next_state = next_state
-       
-        self.state      = self.remapState(state)
-        self.action     = action
-        self.reward     = reward
-        self.next_state = self.remapState(next_state)
-        self.done       = done
-
-    def remapState(self, state):
-        return state #np.array([np.digitize(state[0], self.position_state_array), np.digitize(state[1], self.velocity_state_array)])
 
 
 class Mind():
@@ -92,14 +38,14 @@ class Mind():
 
     def __base_network(self):
         inp       = Input(shape=(self.env_dim,))
-        hidden1   = Dense(32,  activation='relu')(inp)
-        hidden2   = Dense(64, activation='relu')(hidden1)
+      
+        hidden1   = Dense(12,  activation='relu')(inp)
+        hidden2   = Dense(24, activation='relu')(hidden1)
         return Model(inp, hidden2)
         
     def __initializePolicyNetwork(self, optimizer):
-        hiddenLayer1        = Dense(128, activation='relu') (self.__inputNet.output)
-        hiddenLayer2        = Dense(32,  activation='relu') (hiddenLayer1)
-        policyOutput        = Dense(self.act_dim, activation='softmax') (hiddenLayer2)
+        hiddenLayer1        = Dense(12, activation='relu') (self.__inputNet.output)
+        policyOutput        = Dense(self.act_dim, activation='softmax') (hiddenLayer1)
         self.__policyModel  = Model(self.__inputNet.input, policyOutput)
         
         #points to input tensor
@@ -124,10 +70,8 @@ class Mind():
         self.__optPolicy        = K.function([self.policyModel().input, self.action_pl, self.advantages_pl], [], updates=updates)
     
     def __initializeCriticModel(self, optimizer):
-        hiddenLayer1        = Dense(64, activation='relu') (self.__inputNet.output)
-        hiddenLayer2        = Dense(32, activation='relu') (hiddenLayer1)
-        hiddenLayer3        = Dense(12, activation='relu') (hiddenLayer2)
-        criticOutput        = Dense(1,   activation='linear') (hiddenLayer3)
+        hiddenLayer1        = Dense(12, activation='relu') (self.__inputNet.output)
+        criticOutput        = Dense(1,   activation='linear') (hiddenLayer1)
         self.__criticModel  = Model(self.__inputNet.input, criticOutput) 
         self.discounted_r   = K.placeholder(shape=(None,))
         loss                = K.mean(K.square(self.discounted_r - self.criticModel().output))
@@ -140,30 +84,24 @@ class Mind():
             self.episodes.append(episodeData)
 
     def train(self):
-        def discount(r):
-            discounted_r, cumul_r = np.zeros_like(r), 0
-            for t in reversed(range(0, len(r))):
-                cumul_r = r[t] + cumul_r * self.gamma
-                discounted_r[t] = cumul_r
-            return discounted_r
         states  = []
         actions = []
-        rewards = []
+        rewards = [] 
         with self.lock_queue:
             while len(self.episodes) > 0:
                 episodeData = self.episodes.pop()
                 for eps in episodeData :
                     states.append(eps.state)
-                    actions.append(to_categorical(eps.action, self.act_dim))
+                    act = to_categorical(eps.action, self.act_dim,dtype='int32')
+                    actions.append(act)
                     rewards.append(eps.reward)
-                discounted_rewards  = discount(rewards)
                 np_state            = np.array(states)
                 with tensorFlowGraph.as_default():        
                     state_values        = self.criticModel().predict(np_state)
-                    advantages          = discounted_rewards - np.reshape(state_values, len(state_values))
+                    advantages          = rewards - np.reshape(state_values, len(state_values))
                     #Performs optimization
                     self.__optPolicy([states, actions, advantages])
-                    self.__optCritic([states, discounted_rewards])
+                    self.__optCritic([states, rewards])
                 self.trained  = True
 
     def selectAction(self, state):
@@ -175,7 +113,9 @@ class Mind():
         s = reshapeStateWhenNeeded(state)
         with tensorFlowGraph.as_default():
             with self.lock_queue:
-                action =  np.random.choice(np.arange(self.act_dim), 1, p=self.policyModel().predict(s).ravel())[0]
+                #action =  np.random.choice(np.arange(self.act_dim), 1, p=self.policyModel().predict(s).ravel())[0]
+                p=self.policyModel().predict(s).ravel()
+                action = np.argmax(p)
                 return action
 
     def policyModel(self):
@@ -195,18 +135,31 @@ class Mind():
 
 class Agent():
 
-    def __init__(self, env, mind, rewardMapper=None, epsilon=1.0):
+    def __init__(self, env, mind, rewardMapper=None, epsilon=1.0, name=None):
         self.mind              = mind
         self.env               = env
+        self.name              = name
         self.epsilon           = epsilon
-        self.epsilon_decay     = 0.9
+        self.epsilon_decay     = 0.995
         self.episodesPlayed    = 0
         self.rewardMapper      = rewardMapper
+        self.agentEpisode      = 0
+        self.gamma             = 0.99
+
+    def discount(self, episodeData):
+        discounted_r, cumul_r = np.zeros_like(episodeData), 0
+        for t in reversed(range(0, len(episodeData))):
+            episodestep = episodeData[t]
+            cumul_r = episodestep.reward + cumul_r * self.gamma
+            episodestep.reward = cumul_r
+        
 
     def playSingleEpisode(self, render=False):
+        global totalEpisodes
         episodeData = list()
         state       = self.env.reset()
         done        = False
+       # render      = self.name == "Agent-0" and self.agentEpisode  % 10 == 0
         episodeReward = 0
         while not done:
             if np.random.random() < self.epsilon or self.mind.trained == False:
@@ -219,23 +172,24 @@ class Agent():
             episodeReward += reward
             episodeData.append(step)
             state = next_state
-        global totalEpisodes
+        
+        totReward = 0
         if self.rewardMapper != None:
-            self.rewardMapper(episodeData)
-        if self.goodEpisode(episodeData):
-            totalEpisodes       += 1
-            self.mind.pushData(episodeData)
-            self.epsilon        *= self.epsilon_decay
-            self.epsilon         = 0.0 if self.epsilon < 0.001 else self.epsilon
-            return episodeData
-        return None
+            totReward = self.rewardMapper(episodeData)
+        totalEpisodes       += 1
+        self.agentEpisode   += 1
+        self.discount(episodeData)
+        self.mind.pushData(episodeData)
+        self.epsilon        *= self.epsilon_decay
+        self.epsilon         = 0.01 if self.epsilon < 0.01 else self.epsilon
+        return episodeData
+        
     
     def goodEpisode(self, episodeData):
         return True
 
 class A3C:
    
-
     class OptimizerThread(threading.Thread):
         stop_signal = False
         def __init__(self, mind):
@@ -279,15 +233,14 @@ class A3C:
     def train(self, stopCriterion, numEpisodes = 10000, trainStep=1000, remapRewardFunction=None, epsilon=1.0):
         self.optimizer.start()
         agents = list()
-        for __ in range(self.numThreads) :
-            #agent = Agent(gym.make(self.enviromentName), self.mind,  rewardMapper=remapRewardFunction, epsilon=epsilon)     
-            agent = Agent(Enviroment(self.enviromentName), self.mind,  rewardMapper=remapRewardFunction, epsilon=epsilon)     
+        for idEnv in range(self.numThreads) :
+            agent = Agent(Enviroment(self.enviromentName, seed=idEnv), self.mind,  rewardMapper=remapRewardFunction, epsilon=epsilon, name="Agent-"+str(idEnv))     
             agThread =  A3C.AgentThread( agent, self.results )
             agThread.start()
             agents.append(agThread)
         done = False
         while not done:
-            time.sleep(10)
+            time.sleep(1)
             done = stopCriterion(list(self.results.results))
         self.optimizer.stop()
         for agent in agents:
@@ -295,22 +248,6 @@ class A3C:
         self.mind.save(self.enviromentName)
 
 # Examples
-
-def mainCartPole():
-    def trainEndedEvaluator(episodeList):
-        if len(episodeList) < 100:
-            return False
-        actualList = episodeList[-100:]
-        sumRew = 0
-        for episode in actualList:
-            for item in episode:
-                sumRew += item.reward
-        avg = sumRew / len(actualList)
-        print(" Average reward  ", avg)
-        return avg > 450
-   
-    a3c = A3C('CartPole-v1',numThreads=4)
-    a3c.train(stopCriterion= trainEndedEvaluator)
 
 def mainMountain():
 
@@ -326,8 +263,13 @@ def mainMountain():
         minP    = 100
         maxP    = -100
         velocity = 0.0
+        changes    = 0
         for episode in actualList:
+            lastAction = None
             for item in episode:
+                if lastAction != item.action:
+                    lastAction = item.action
+                    changes +=1
                 sumRew += item.reward
                 position = item.next_state[0]
                 velocity += item.next_state[1]
@@ -336,39 +278,36 @@ def mainMountain():
                 if position >= goal_position:
                     solved += 1
         avg = sumRew / len(actualList)
+        avgChanges = changes / len(actualList)
         avgSpeed = velocity / (len(actualList) * 200)
         bestRewardSoFar = avg
-        print("Goal position ", goal_position, " Average reward  after ", totalEpisodes, " episodes is ", avg, "Solved = ", solved, " best range (",minP, ", ", maxP,") , avg speed ",avgSpeed)
+        print("Avg Changes", avgChanges, " Average reward  after ", totalEpisodes, " episodes is ", avg, "Solved = ", solved, " best range (",minP, ", ", maxP,") , avg speed ",avgSpeed)
         if solved / 10.0 > 0.9:
-            if goal_position >= 0.5:
-                return True
-            else:
-                goal_position += 0.05
-                print("Moving goal position to ", goal_position)
-                return False
+            return True
+        
     
     def remapReward(episodeData):
         x0          = -0.5 
-        changes     = 0
-        lastAction  = None
         global goal_position
+        totalReward  = 0
+        bestPosition = -2
+        minPos  = +5
+        maxPos  = -5
         for eps in episodeData:
-            if lastAction == None or eps.action != lastAction:
-                lastAction = eps.action
-                changes   += 1
-            position = eps.next_state[0]
-            velocity = eps.next_state[1] 
-            multiplier = 1.1 if position >= -0.2  else 1
-            potential = abs(position - x0) * multiplier
-            kinetic   = ((velocity * 10) ** 2) * 0.5
-            eps.reward = potential + kinetic
-            if position >= goal_position:
-                eps.reward = 10
+            position   = eps.next_state[0]
+            minPos     = min(minPos, position)
+            maxPos     = max(maxPos, position)
+        delta_inf      = x0-minPos
+        delta_sup      = maxPos - x0
+        rew            = abs(delta_sup) - abs(delta_inf)
         for eps in episodeData:
-            eps.reward /= changes
-    a3c = A3C('MountainCar-v0',numThreads=6)
+            eps.reward = rew / len(episodeData)
+        totalReward = rew
+        return totalReward
+            
+    a3c = A3C('MountainCar-v0',numThreads=10)
     a3c.train(stopCriterion= trainEndedEvaluator,remapRewardFunction=remapReward, epsilon=1.0)
 
 
-mainCartPole()
+mainMountain()
 

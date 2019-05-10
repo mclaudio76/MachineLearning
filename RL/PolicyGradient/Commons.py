@@ -4,10 +4,11 @@ from collections      import deque
 
 class Enviroment:
 
-    def __init__(self, envName):
+    def __init__(self, envName, seed=42):
         self.envName = envName
         self.env      = gym.make(envName)
-        self.env.reset()       
+        self.env.reset()    
+        self.env.seed(seed)   
         self.env_dim           = self.env.observation_space.shape[0]
         self.act_dim           = self.env.action_space.n 
 

@@ -10,7 +10,6 @@ from keras import regularizers
 from keras.utils import to_categorical
 from keras.layers import Input, Dense, Flatten
 from keras.optimizers import Adam, SGD
-from collections      import deque   
 from Commons          import Enviroment,EpisodeStep, History
 
 
