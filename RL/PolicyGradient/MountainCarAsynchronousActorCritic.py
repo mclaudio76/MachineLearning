@@ -21,7 +21,7 @@ goal_position   = 0.5
 
 class Mind():
     
-    def __init__(self, env_dim, act_dim, policyOptimizer, criticOptimizer):
+    def __init__(self, env_dim, act_dim, policyOptimizer, criticOptimizer,trained = False):
         self.lock_queue        = threading.Lock()
         self.env_dim           = env_dim
         self.act_dim           = act_dim
@@ -29,7 +29,7 @@ class Mind():
         self.__initializePolicyNetwork(policyOptimizer)
         self.__initializeCriticModel(criticOptimizer)
         self.gamma = 0.99
-        self.trained = False
+        self.trained = trained
         self.episodes = list()
      
     ''' This method builds common shared network,
@@ -168,6 +168,8 @@ class Agent():
                 action = self.mind.selectAction(state)
             next_state, reward, done, __ = self.env.step(action)
             self.env.render(render)
+            if render:
+                time.sleep(0.1)
             step                         = EpisodeStep(state, action, reward,next_state, done)
             episodeReward += reward
             episodeData.append(step)
@@ -247,6 +249,14 @@ class A3C:
             agent.stop()
         self.mind.save(self.enviromentName)
 
+    def play(self):
+        self.mind.trained = True
+        self.mind.load_weights(self.enviromentName)
+        agent = Agent(Enviroment(self.enviromentName), self.mind, epsilon=0.0)  
+        agent.playSingleEpisode(render=True) 
+           
+
+
 # Examples
 
 def mainMountain():
@@ -308,6 +318,11 @@ def mainMountain():
     a3c = A3C('MountainCar-v0',numThreads=10)
     a3c.train(stopCriterion= trainEndedEvaluator,remapRewardFunction=remapReward, epsilon=1.0)
 
+def playMountain():
+    a3c = A3C('MountainCar-v0')
+    a3c.play()
 
-mainMountain()
+#mainMountain()
+
+playMountain()
 

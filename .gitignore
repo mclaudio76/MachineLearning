@@ -337,3 +337,5 @@ RL/BreakOut/DDQBreakoutDeterministic-v4-agent.hdf5
 RL/BreakOut/DDQBreakoutDeterministic-v4-qvalue.hdf5
 CartPole-v1-critic.model
 CartPole-v1-policy.model
+MountainCar-v0-policy.model
+MountainCar-v0-critic.model
