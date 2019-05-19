@@ -3,11 +3,15 @@ import random
 import math
 import sys
 import numpy as np
+import tensorflow as tf
+
 from keras.models     import Sequential
 from keras.layers     import Dense
 from keras.optimizers import Adam, SGD
 from keras.models     import load_model
-from collections      import deque    
+from collections      import deque
+from keras            import backend as K
+
 
 '''
 Mauri Claudio, 25.04.2019
@@ -15,6 +19,24 @@ Mauri Claudio, 25.04.2019
 Implementation of a DeepQ-Learning based Agent.
 Supports both DQ and DDQ learning approaches
 '''
+
+class Memory: 
+    samples = []
+    def __init__(self, capacity):
+        self.capacity = capacity
+
+    def add(self, sample):
+        self.samples.append(sample)        
+        if self.isFull():
+            self.samples.pop(0)
+    
+    def sample(self, n):
+        n = min(n, len(self.samples))
+        return random.sample(self.samples, n)
+    
+    def isFull(self):
+        return len(self.samples) >= self.capacity
+
 
 class EpisodeStep:
     def __init__(self, state, action, reward, next_state, done):
@@ -26,7 +48,7 @@ class EpisodeStep:
 
 class Mind:
 
-    def __init__(self, env, epsilon_max = 1.0, epsilon_min=0.01, epsilon_decay=0.001, gamma_reward = 0.95, DDQEnabled=True, DQQSwap=10, memorySize=100000):
+    def __init__(self, env, epsilon_max = 1.0, epsilon_min=0.01, epsilon_decay=0.001, gamma_reward = 0.95, DDQEnabled=True, DQQSwap=1000, memorySize=100000):
         self.env               = env
         self.state_size        = self.env.observation_space.shape[0]
         self.action_size       = self.env.action_space.n 
@@ -40,7 +62,7 @@ class Mind:
         self.gamma             = gamma_reward    # how much future rewards are worth?
         self.DDQEnabled        = DDQEnabled      # enables DDQ Learning
         self.DQQSwap           = DQQSwap
-        self.memory            = deque(maxlen=memorySize)
+        self.memory            = Memory(capacity=memorySize)
         # in DDQ learning, two distinc models are created.
         self.qfunct_current    = self.__buildModel(self.state_size, self.action_size)
         self.qfunct_target     = self.__buildModel(self.state_size, self.action_size)
@@ -70,12 +92,12 @@ class Mind:
     '''
     def __buildModel(self, input_size, output_size):
         model = Sequential()
-        model.add(Dense(64, input_dim=input_size, activation='relu'))
-        model.add(Dense(36, activation='relu'))
-        model.add(Dense(12, activation='relu'))
+        model.add(Dense(128, input_dim=input_size, activation='relu'))
+        model.add(Dense(64, activation='relu'))
+        #model.add(Dense(12, activation='relu'))
         model.add(Dense(output_size, activation='linear'))
-        optimizer = Adam(lr=0.0001) 
-        model.compile(loss='mse', optimizer=optimizer)
+        optimizer = Adam(lr=0.001) 
+        model.compile(loss="mse", optimizer=optimizer)
         return model
 
     def __computeQValue(self, model, state):
@@ -96,17 +118,19 @@ class Mind:
             action = np.argmax(self.__computeQValue(self.qfunct_current,state))
         return action
 
+    def memorize(self, episodestep):
+        self.memory.add(episodestep)
+
     '''
     Trains the NN using experience replay. A sigle step is added to the memory
     buffer, from wich a small sample is taken to train the NN.
     '''
-    def train(self, episodeStep):
-        self.memory.appendleft(episodeStep)
-        minibatch = random.sample(self.memory, min(len(self.memory), 32))
+    def train(self, batch_size):
+        minibatch = self.memory.sample(batch_size)
         self.__batch_train(minibatch)
         self.train_runs += 1
         self.epsilon  = self.epsilon_min + (1.0 - self.epsilon_min) * math.exp(-self.epsilon_decay * self.train_runs)
-        if self.train_runs > 0 and self.train_runs % self.DQQSwap == 0 and self.DDQEnabled:    
+        if self.train_runs > self.DQQSwap and self.train_runs % self.DQQSwap == 0 and self.DDQEnabled:    
             self.qfunct_target.set_weights(self.qfunct_current.get_weights())
         
 
@@ -158,12 +182,13 @@ class DQAgent:
        
     '''
     Collects and returns the whole episode steps' data.
+    Each episode step is pushed to the memory of the 'mind'
+    and a train sequence is performed
     '''
     def playSingleEpisode(self):
         episodeData = list()
         state       = self.env.reset()
         done        = False
-        
         while not done:
             action                       = self.mind.selectAction(state)
             next_state, reward, done, __ = self.env.step(action)
@@ -173,8 +198,10 @@ class DQAgent:
             if self.custom_reward != None:
                 self.custom_reward(step)
             episodeData.append(step)
-            self.mind.train(step)
+            self.mind.memorize(step)
             state = next_state
+            if self.train:
+                self.mind.train(64)
         return episodeData
 
 
@@ -190,13 +217,14 @@ def trainCartPole():
         return totalReward
     
     def finished(results):
-        if len(results) < 10:
+        LIMIT = 100
+        if len(results) < LIMIT:
             return False
-        sample = results[-10:]
+        sample = results[-LIMIT:]
         tReward = 0
-        for x in range(10):
+        for x in range(LIMIT):
             tReward += totalReward(sample[x])
-        return tReward / 10 >= 450
+        return tReward / LIMIT >= 450
 
     results = list()
     episodeNumber     = 100000
@@ -208,13 +236,33 @@ def trainCartPole():
     for currentEpisode in range(episodeNumber):
         episodeData = agent.playSingleEpisode()
         reward      = totalReward(episodeData)
-        print("Playing current episode ", currentEpisode, " reward ", reward)
+        if currentEpisode % 50 == 0:
+            print("Playing current episode ", currentEpisode, " reward ", reward)
         results.append(episodeData)
         if finished(results):
             mind.saveModels(enviromentName)
             print("Train successful !!! ")
             return
+
+def playCartPole():
+    
+    def totalReward(episodeData):
+        totalReward = 0
+        for epsStep in episodeData:
+            totalReward += epsStep.reward
+        return totalReward
+    episodeNumber     = 10
+    enviromentName    = "CartPole-v1"
+    env = gym.make(enviromentName) # creates enviroment using symbolic name
+    env.reset()                    # reset enviroment
+    mind = Mind(env)
+    agent = DQAgent(enviromentName,env,mind, train=False)
+    for currentEpisode in range(episodeNumber):
+        episodeData = agent.playSingleEpisode()
+        reward      = totalReward(episodeData)
+        print("Playing current episode ", currentEpisode, " reward ", reward)
         
-     
-trainCartPole()
+        
+#trainCartPole()     
+playCartPole()
     
