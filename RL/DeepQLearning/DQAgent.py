@@ -1,6 +1,6 @@
 import gym
 import random
-import math
+import math,time
 import sys
 import numpy as np
 import tensorflow as tf
@@ -244,15 +244,13 @@ def trainCartPole():
             print("Train successful !!! ")
             return
 
-def playCartPole():
-    
+def playGame(enviromentName):
     def totalReward(episodeData):
         totalReward = 0
         for epsStep in episodeData:
             totalReward += epsStep.reward
         return totalReward
     episodeNumber     = 10
-    enviromentName    = "CartPole-v1"
     env = gym.make(enviromentName) # creates enviroment using symbolic name
     env.reset()                    # reset enviroment
     mind = Mind(env)
@@ -260,9 +258,63 @@ def playCartPole():
     for currentEpisode in range(episodeNumber):
         episodeData = agent.playSingleEpisode()
         reward      = totalReward(episodeData)
+        time.sleep(0.3)
         print("Playing current episode ", currentEpisode, " reward ", reward)
         
-        
-#trainCartPole()     
-playCartPole()
+
+def trainMountainCar():
     
+    def totalReward(episodeData):
+        totalReward = 0
+        for epsStep in episodeData:
+            totalReward += epsStep.reward
+        return totalReward
+    
+    def finished(results):
+        LIMIT = 100
+        if len(results) < LIMIT:
+            return False
+        sample = results[-LIMIT:]
+        won    = 0
+        for x in range(LIMIT):
+            if gameWin(sample[x]):
+                won += 1
+        if won > 0:
+            print ("Won games ratio ", won, "/", LIMIT)
+        return won / LIMIT >= 0.9
+
+    def gameWin(episode):
+        for epsStep in episode:
+            if epsStep.next_state[0] >= 0.5:
+               return True
+        return False
+
+    def cstReward(episodeStep):
+        if episodeStep.next_state[0] >=  -0.2:
+           episodeStep.reward = 1
+        if episodeStep.next_state[0] >=   0.5:
+           episodeStep.reward = 10 # won the game
+        
+        
+
+    results = list()
+    episodeNumber     = 100000
+    enviromentName    = "MountainCar-v0"
+    env = gym.make(enviromentName) # creates enviroment using symbolic name
+    env.reset()                    # reset enviroment
+    mind = Mind(env)
+    agent = DQAgent(enviromentName,env,mind, custom_reward=cstReward)
+    for currentEpisode in range(episodeNumber):
+        episodeData = agent.playSingleEpisode()
+        reward      = totalReward(episodeData)
+        print("Playing current episode ", currentEpisode, " reward ", reward)
+        results.append(episodeData)
+        if finished(results):
+            mind.saveModels(enviromentName)
+            print("Train successful !!! ")
+            return
+
+#trainCartPole()     
+#playGame("CartPole-v1")
+#trainMountainCar()
+playGame("MountainCar-v0")
