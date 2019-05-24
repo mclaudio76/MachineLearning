@@ -53,7 +53,7 @@ class A3C:
         commons.tensorFlowGraph   = K.get_session().graph
         
 
-    def train(self, stopFunction, numEpisodes = 10000, trainStep=1000, remapRewardFunction=None, epsilon=1.0):
+    def train(self, stopFunction, remapRewardFunction=None, epsilon=1.0):
         self.optimizer.start()
         agents = list()
         for idEnv in range(self.numThreads) :
@@ -74,4 +74,4 @@ class A3C:
         self.mind.trained = True
         self.mind.load_weights(self.enviromentName)
         agent = Agent(Enviroment(self.enviromentName), self.mind, epsilon=0.0)  
-        agent.playSingleEpisode(render=True) 
+        return agent.playSingleEpisode(render=True) 

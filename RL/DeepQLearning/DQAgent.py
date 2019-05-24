@@ -193,6 +193,7 @@ class DQAgent:
             action                       = self.mind.selectAction(state)
             next_state, reward, done, __ = self.env.step(action)
             if not self.train:
+                time.sleep(0.05)
                 self.env.render()
             step                         = EpisodeStep(state, action, reward,next_state, done)
             if self.custom_reward != None:
@@ -250,7 +251,7 @@ def playGame(enviromentName):
         for epsStep in episodeData:
             totalReward += epsStep.reward
         return totalReward
-    episodeNumber     = 10
+    episodeNumber     = 1
     env = gym.make(enviromentName) # creates enviroment using symbolic name
     env.reset()                    # reset enviroment
     mind = Mind(env)

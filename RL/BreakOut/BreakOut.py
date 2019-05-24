@@ -32,7 +32,7 @@ class EpisodeStep:
 
 class DQBreakOut:
     
-    def __init__(self, enviromentName: str, memoryBufferSize: int, epsilon = 1.0, epsilon_decay=0.95, discount_factor = 0.95, train=True, DDQEnabled=False):
+    def __init__(self, enviromentName: str, memoryBufferSize: int, epsilon = 1.0, epsilon_decay=0.95, discount_factor = 0.99, train=True, DDQEnabled=False):
         
         self.enviromentName    = enviromentName
         self.env = gym.make(enviromentName) # creates enviroment using symbolic name
@@ -84,8 +84,6 @@ class DQBreakOut:
         # Flattening the second convolutional layer.
         conv_flattened = Flatten()(conv_2)
         # "The final hidden layer is fully-connected and consists of 256 rectifier units."
-        #hidden      = Dense(256, activation='relu')(conv_flattened)
-        #outlayer    = Dense(256)(hidden)
         outlayer     = Dense(256, activation='relu')(conv_flattened)
         model       = Model(inputs=frames_input, outputs=outlayer)
         return model
@@ -185,11 +183,12 @@ class DQBreakOut:
             
             if info['ale.lives']  < lives:
                 lives =   info['ale.lives']
-                step.reward = -10 
-            
                 done = True
             totalReward += step.reward
             episodeData.append(step)
+            self.memory.appendleft(step)
+            minibatch = random.sample(self.memory, min(len(self.memory), 32))
+            self.batch_train(minibatch)
             history_state = history_next_state
            
         return episodeData, totalReward
@@ -202,33 +201,21 @@ class DQBreakOut:
   
     def train(self, trainStep = 100, swapStep  = 100, numEpisodes=10000, minibatchSize=1000, customize_reward_function = None, progress_log_funct = None):
         results = list()
-        totalGoods = 0
-        goodScore  = 0
         for currentEpisode in range(numEpisodes):
             episodeData, totalEpisodeReward = self.playSingleEpisode(render=False)
             if customize_reward_function != None:
                 customize_reward_function(episodeData)
-            if totalEpisodeReward > -10:
-                #print("[Good Episode ", currentEpisode, "/",numEpisodes,"]; epsilon ", self.epsilon,"reward ",totalEpisodeReward, end='\n')
-                results.append(episodeData)
-                self.pushToMemory(episodeData)        
-                totalGoods += 1    
-                goodScore  += totalEpisodeReward
-            if currentEpisode > 0 and currentEpisode % trainStep == 0 and totalGoods > minibatchSize:
-                minibatch = random.sample(self.memory, min(len(self.memory), minibatchSize))
-                print("[CurrentEpisode]", currentEpisode," Now Training : total goods ",totalGoods, " avg = ",(goodScore / totalGoods), " epsilon = ",self.epsilon)
-                time.sleep(1)
-                totalGoods = 0
-                goodScore  = 0
-                self.batch_train(minibatch)
-                if progress_log_funct != None:
-                    progress_log_funct(results)
-                self.saveModels()
+            results.append(episodeData)
+            #self.pushToMemory(episodeData)        
+            #minibatch = random.sample(self.memory, min(len(self.memory), minibatchSize))
+            print("[CurrentEpisode]", currentEpisode," episode reward = ",totalEpisodeReward, " epsilon = ",self.epsilon)
+            #self.batch_train(minibatch)
+            self.saveModels()
+            if currentEpisode % trainStep == 0 and currentEpisode > 0:
                 self.epsilon *= self.epsilon_decay
-                self.epsilon  = 0 if self.epsilon < 0.001 else self.epsilon
+                self.epsilon  = 0.1 if self.epsilon < 0.001 else self.epsilon
+            if currentEpisode % swapStep == 0 and currentEpisode > 0:
                 self.qfunction_model.set_weights(self.agent_model.get_weights())
-                self.memory.clear()
-
 
 
 
@@ -243,8 +230,8 @@ def main():
                     totalScore += eps.reward
             print(" Avg score  on last 100 games", totalScore / 100)
 
-    agent = DQBreakOut(enviromentName='BreakoutDeterministic-v4', memoryBufferSize=150000, DDQEnabled=True, train=True)
-    agent.train(trainStep=1000,swapStep=10, numEpisodes=1000000, minibatchSize=250, progress_log_funct=progress_log_funct)
+    agent = DQBreakOut(enviromentName='BreakoutDeterministic-v4', memoryBufferSize=350000, DDQEnabled=True, train=True)
+    agent.train(trainStep=2000,swapStep=100, numEpisodes=1500000, minibatchSize=32, progress_log_funct=progress_log_funct)
     #agent.playSingleEpisode(render=True)
 
 main()

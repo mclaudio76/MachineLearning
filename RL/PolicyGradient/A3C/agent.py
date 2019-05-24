@@ -37,7 +37,7 @@ class Agent():
             next_state, reward, done, __ = self.env.step(action)
             self.env.render(render)
             if render:
-                time.sleep(0.1)
+                time.sleep(0.01)
             step                         = EpisodeStep(state, action, reward,next_state, done)
             episodeReward += reward
             episodeData.append(step)
@@ -50,7 +50,7 @@ class Agent():
         self.mind.pushData(episodeData)
         self.epsilon        *= self.epsilon_decay
         self.epsilon         = 0.01 if self.epsilon < 0.01 else self.epsilon
-        return episodeData
+        return episodeData,episodeReward
         
     
   
